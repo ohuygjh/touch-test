@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="data:," />
+    <title>触控检测</title>
+    <style>
+      :root {
+        --bg: #f2f2f4;
+        --grid: rgba(20, 20, 30, 0.09);
+        --grid-strong: rgba(20, 20, 30, 0.18);
+        --grid-label: rgba(20, 20, 30, 0.38);
+        --panel: rgba(255, 255, 255, 0.88);
+        --panel-border: rgba(20, 20, 30, 0.12);
+        --ink: #17171c;
+        --ink-dim: #5c5c66;
+        --accent: #e02318;
+        --btn-bg: rgba(20, 20, 30, 0.06);
+        --btn-bg-on: #17171c;
+        --btn-ink-on: #ffffff;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0b0b0e;
+          --grid: rgba(255, 255, 255, 0.08);
+          --grid-strong: rgba(255, 255, 255, 0.17);
+          --grid-label: rgba(255, 255, 255, 0.34);
+          --panel: rgba(22, 22, 28, 0.88);
+          --panel-border: rgba(255, 255, 255, 0.13);
+          --ink: #f2f2f5;
+          --ink-dim: #a2a2ae;
+          --accent: #ff3b30;
+          --btn-bg: rgba(255, 255, 255, 0.09);
+          --btn-bg-on: #f2f2f5;
+          --btn-ink-on: #17171c;
+        }
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: none;
+      }
+      #stage {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        touch-action: none;
+      }
+      .hud {
+        position: fixed;
+        top: 0; left: 0; right: 0;
+        padding: calc(env(safe-area-inset-top, 0px) + 8px) 10px 8px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        pointer-events: none;
+        z-index: 5;
+      }
+      .hud .card {
+        pointer-events: auto;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+      }
+      .stats {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 8px 14px;
+        font-variant-numeric: tabular-nums;
+      }
+      .stat { line-height: 1.15; }
+      .stat .num { font-size: 20px; font-weight: 700; letter-spacing: 0.01em; }
+      .stat .num.red { color: var(--accent); }
+      .stat .lab { font-size: 11px; color: var(--ink-dim); margin-top: 1px; }
+      .stat .num.small { font-size: 14px; font-weight: 600; padding-top: 3px; }
+      .actions {
+        display: flex;
+        gap: 6px;
+        padding: 5px;
+        margin-left: auto;
+      }
+      button {
+        appearance: none;
+        border: 0;
+        border-radius: 8px;
+        background: var(--btn-bg);
+        color: var(--ink);
+        font: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        min-height: 40px;
+        padding: 8px 14px;
+        cursor: pointer;
+      }
+      button:active { opacity: 0.65; }
+      button.on { background: var(--btn-bg-on); color: var(--btn-ink-on); }
+      .note {
+        position: fixed;
+        left: 10px; right: 10px;
+        top: calc(env(safe-area-inset-top, 0px) + 74px);
+        z-index: 4;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        padding: 12px 14px;
+        font-size: 13.5px;
+        line-height: 1.65;
+      }
+      .note b { color: var(--accent); }
+      .note .row { display: flex; gap: 10px; align-items: flex-start; }
+      .note p { margin: 0; flex: 1; }
+      .note button { flex: none; min-height: 36px; padding: 6px 12px; font-size: 13px; }
+      .note[hidden] { display: none; }
+      .hint {
+        position: fixed;
+        left: 0; right: 0;
+        top: 46%;
+        text-align: center;
+        color: var(--ink-dim);
+        font-size: 15px;
+        line-height: 1.9;
+        pointer-events: none;
+        z-index: 1;
+        padding: 0 24px;
+      }
+      .hint .big { font-size: 17px; font-weight: 600; color: var(--ink); }
+      .hint[hidden] { display: none; }
+      .log {
+        position: fixed;
+        left: 10px;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+        z-index: 5;
+        max-width: min(78vw, 340px);
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        padding: 9px 12px 10px;
+        font-size: 12px;
+      }
+      .log h2 {
+        margin: 0 0 5px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--ink-dim);
+        letter-spacing: 0.06em;
+      }
+      .log ul {
+        list-style: none;
+        margin: 0; padding: 0;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-variant-numeric: tabular-nums;
+        line-height: 1.75;
+        color: var(--ink);
+      }
+      .log li:first-child:not(.empty) { color: var(--accent); font-weight: 700; }
+      .log .empty { color: var(--ink-dim); font-family: inherit; }
+      .paused-banner {
+        position: fixed;
+        left: 50%;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+        transform: translateX(-50%);
+        z-index: 6;
+        background: var(--accent);
+        color: #fff;
+        font-size: 13px;
+        font-weight: 700;
+        padding: 8px 16px;
+        border-radius: 999px;
+      }
+      .paused-banner[hidden] { display: none; }
+      @media (max-width: 560px) {
+        .stats { gap: 10px; padding: 7px 11px; }
+        .stat .num { font-size: 17px; }
+        .actions { margin-left: 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+
+    <div class="hint" id="hint">
+      <div class="big">把这台手机放着别动</div>
+      <div>屏幕哪里被触发，哪里就会亮起红点<br />红点反复自己出现的位置，就是触控出问题的地方</div>
+    </div>
+
+    <header class="hud" id="hud">
+      <div class="card stats" aria-live="polite">
+        <div class="stat">
+          <div class="num red" id="statTotal">0</div>
+          <div class="lab">累计触发</div>
+        </div>
+        <div class="stat">
+          <div class="num" id="statRecent">0</div>
+          <div class="lab">近 10 秒</div>
+        </div>
+        <div class="stat">
+          <div class="num small" id="statLast">—</div>
+          <div class="lab">最近一次位置</div>
+        </div>
+      </div>
+      <div class="card actions">
+        <button type="button" id="btnNote">说明</button>
+        <button type="button" id="btnWake" hidden>屏幕常亮</button>
+        <button type="button" id="btnPause">暂停</button>
+        <button type="button" id="btnClear">清除</button>
+      </div>
+    </header>
+
+    <div class="note" id="note">
+      <div class="row">
+        <p>按你的需求做的：这台手机屏幕会自己乱点，所以这个页面全屏盯着触控——<b>哪里被点到，哪里立刻亮起一个红点</b>；红点不永久停留，亮起后约 <b>3 秒</b>内<b>由大变小</b>，最后缩没消失。你把手机放着不用碰，盯着看红点自己在哪里冒出来，那就是触控坏掉的位置；网格和坐标能帮你说清它在屏幕的哪一块。</p>
+        <button type="button" id="btnNoteClose">收起</button>
+      </div>
+    </div>
+
+    <section class="log" id="logPanel" aria-label="最近触发记录">
+      <h2>最近触发记录（红点消失后看这里）</h2>
+      <ul id="logList">
+        <li class="empty">还没有记录</li>
+      </ul>
+    </section>
+
+    <div class="paused-banner" id="pausedBanner" hidden>已暂停检测 · 点上方「继续」恢复</div>
+
+    <script>
+      (function () {
+        'use strict';
+
+        var LIFE = 3000;      // 红点存活时间（毫秒）：约 3 秒
+        var MAX_R = 30;       // 红点刚出现时的最大半径（CSS 像素）
+        var MOVE_GAP = 14;    // 拖动时相邻记录点的最小间距
+
+        var canvas = document.getElementById('stage');
+        var ctx = canvas.getContext('2d');
+        var statTotal = document.getElementById('statTotal');
+        var statRecent = document.getElementById('statRecent');
+        var statLast = document.getElementById('statLast');
+        var logList = document.getElementById('logList');
+        var hint = document.getElementById('hint');
+        var note = document.getElementById('note');
+        var hud = document.getElementById('hud');
+        var pausedBanner = document.getElementById('pausedBanner');
+        var btnPause = document.getElementById('btnPause');
+        var btnClear = document.getElementById('btnClear');
+        var btnNote = document.getElementById('btnNote');
+        var btnNoteClose = document.getElementById('btnNoteClose');
+        var btnWake = document.getElementById('btnWake');
+
+        var W = 0, H = 0, DPR = 1;
+        var points = [];        // {x, y, t} 正在显示的红点
+        var total = 0;          // 累计触发次数
+        var recentTimes = [];   // 近 10 秒触发时间戳
+        var logCount = 0;
+        var paused = false;
+        var lastMove = {};      // pointerId -> {x, y}
+
+        function resize() {
+          DPR = Math.min(window.devicePixelRatio || 1, 3);
+          W = window.innerWidth;
+          H = window.innerHeight;
+          canvas.width = Math.round(W * DPR);
+          canvas.height = Math.round(H * DPR);
+          ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+          // 说明横幅紧贴顶部栏下方（顶部栏在窄屏会换行变高，不能写死距离）
+          if (hud) note.style.top = (hud.offsetTop + hud.offsetHeight + 6) + 'px';
+        }
+        window.addEventListener('resize', resize);
+        window.addEventListener('orientationchange', resize);
+        resize();
+
+        var rootStyle = null;
+        function frame(now) {
+          // 每帧重读颜色太贵，缓存计算样式（主题切换时由 matchMedia 失效）
+          if (!rootStyle) {
+            var cs = getComputedStyle(document.documentElement);
+            rootStyle = {
+              grid: cs.getPropertyValue('--grid'),
+              strong: cs.getPropertyValue('--grid-strong'),
+              label: cs.getPropertyValue('--grid-label')
+            };
+          }
+          ctx.clearRect(0, 0, W, H);
+          // 网格
+          var i, x, y;
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = rootStyle.grid;
+          ctx.beginPath();
+          for (i = 1; i < 10; i++) {
+            x = Math.round((W * i) / 10) + 0.5;
+            y = Math.round((H * i) / 10) + 0.5;
+            ctx.moveTo(x, 0); ctx.lineTo(x, H);
+            ctx.moveTo(0, y); ctx.lineTo(W, y);
+          }
+          ctx.stroke();
+          ctx.strokeStyle = rootStyle.strong;
+          ctx.beginPath();
+          ctx.moveTo(Math.round(W / 2) + 0.5, 0); ctx.lineTo(Math.round(W / 2) + 0.5, H);
+          ctx.moveTo(0, Math.round(H / 2) + 0.5); ctx.lineTo(W, Math.round(H / 2) + 0.5);
+          ctx.stroke();
+          ctx.fillStyle = rootStyle.label;
+          ctx.font = '10px ui-monospace, Menlo, Consolas, monospace';
+          ctx.textBaseline = 'top';
+          ctx.textAlign = 'left';
+          for (i = 1; i < 10; i++) {
+            ctx.fillText(i * 10 + '%', (W * i) / 10 + 4, 4);
+          }
+          // 纵向刻度放右边缘，避免被左下记录面板和说明卡遮挡
+          ctx.textAlign = 'right';
+          for (i = 1; i < 10; i++) {
+            ctx.fillText(i * 10 + '%', W - 5, (H * i) / 10 + 4);
+          }
+          // 红点：年龄越大半径越小，3 秒时缩到 0 消失
+          points = points.filter(function (p) { return now - p.t < LIFE; });
+          for (i = 0; i < points.length; i++) {
+            var p = points[i];
+            var k = (now - p.t) / LIFE;         // 0 → 1
+            var r = MAX_R * (1 - k);             // 由大变小
+            if (r <= 0.4) continue;
+            // 外圈
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r + 5 * (1 - k), 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(224, 35, 24, 0.45)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            // 实心红点
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(224, 35, 24, 0.88)';
+            ctx.fill();
+            // 中心亮点，最后阶段也看得清
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, Math.max(1.6, r * 0.22), 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.fill();
+          }
+          requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+
+        if (window.matchMedia) {
+          var mq = window.matchMedia('(prefers-color-scheme: dark)');
+          if (mq.addEventListener) mq.addEventListener('change', function () { rootStyle = null; });
+        }
+
+        function fmtTime(d) {
+          function pad(n) { return (n < 10 ? '0' : '') + n; }
+          return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+        }
+
+        function updateRecent(now) {
+          recentTimes = recentTimes.filter(function (t) { return now - t < 10000; });
+          statRecent.textContent = recentTimes.length;
+        }
+
+        function addPoint(x, y) {
+          if (paused) return;
+          var now = performance.now();
+          points.push({ x: x, y: y, t: now });
+          total += 1;
+          recentTimes.push(now);
+          statTotal.textContent = total;
+          updateRecent(now);
+          var px = Math.round((x / W) * 100);
+          var py = Math.round((y / H) * 100);
+          statLast.textContent = '横 ' + px + '% · 竖 ' + py + '%';
+          if (!hint.hidden) hint.hidden = true;
+          // 记录列表（最新在最上，最多 8 条）
+          if (logCount === 0) logList.innerHTML = '';
+          logCount += 1;
+          var li = document.createElement('li');
+          li.textContent = fmtTime(new Date()) + '  横' + px + '% 竖' + py + '%  (' + Math.round(x) + ', ' + Math.round(y) + ')';
+          logList.insertBefore(li, logList.firstChild);
+          while (logList.children.length > 8) logList.removeChild(logList.lastChild);
+        }
+
+        // 近 10 秒计数每秒刷新一次（即使没新触控也会回落）
+        setInterval(function () { updateRecent(performance.now()); }, 1000);
+
+        if (window.PointerEvent) {
+          window.addEventListener('pointerdown', function (e) {
+            lastMove[e.pointerId] = { x: e.clientX, y: e.clientY };
+            addPoint(e.clientX, e.clientY);
+          }, { passive: true });
+          window.addEventListener('pointermove', function (e) {
+            var last = lastMove[e.pointerId];
+            if (!last) return;
+            var dx = e.clientX - last.x, dy = e.clientY - last.y;
+            if (dx * dx + dy * dy >= MOVE_GAP * MOVE_GAP) {
+              lastMove[e.pointerId] = { x: e.clientX, y: e.clientY };
+              addPoint(e.clientX, e.clientY);
+            }
+          }, { passive: true });
+          function endPointer(e) { delete lastMove[e.pointerId]; }
+          window.addEventListener('pointerup', endPointer);
+          window.addEventListener('pointercancel', endPointer);
+        } else {
+          // 老浏览器回退：Touch Events
+          window.addEventListener('touchstart', function (e) {
+            for (var i = 0; i < e.changedTouches.length; i++) {
+              var t = e.changedTouches[i];
+              lastMove[t.identifier] = { x: t.clientX, y: t.clientY };
+              addPoint(t.clientX, t.clientY);
+            }
+          }, { passive: true });
+          window.addEventListener('touchmove', function (e) {
+            for (var i = 0; i < e.changedTouches.length; i++) {
+              var t = e.changedTouches[i];
+              var last = lastMove[t.identifier];
+              if (!last) continue;
+              var dx = t.clientX - last.x, dy = t.clientY - last.y;
+              if (dx * dx + dy * dy >= MOVE_GAP * MOVE_GAP) {
+                lastMove[t.identifier] = { x: t.clientX, y: t.clientY };
+                addPoint(t.clientX, t.clientY);
+              }
+            }
+          }, { passive: true });
+          function endTouch(e) {
+            for (var i = 0; i < e.changedTouches.length; i++) delete lastMove[e.changedTouches[i].identifier];
+          }
+          window.addEventListener('touchend', endTouch);
+          window.addEventListener('touchcancel', endTouch);
+          window.addEventListener('mousedown', function (e) { addPoint(e.clientX, e.clientY); });
+        }
+
+        // 阻止页面滚动 / 下拉刷新 / 双击缩放干扰检测
+        document.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+        document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
+        document.addEventListener('dblclick', function (e) { e.preventDefault(); });
+
+        btnClear.addEventListener('click', function () {
+          points = [];
+          total = 0;
+          recentTimes = [];
+          logCount = 0;
+          statTotal.textContent = '0';
+          statRecent.textContent = '0';
+          statLast.textContent = '—';
+          logList.innerHTML = '<li class="empty">还没有记录</li>';
+        });
+
+        btnPause.addEventListener('click', function () {
+          paused = !paused;
+          btnPause.textContent = paused ? '继续' : '暂停';
+          btnPause.classList.toggle('on', paused);
+          pausedBanner.hidden = !paused;
+        });
+
+        btnNoteClose.addEventListener('click', function () { note.hidden = true; });
+        btnNote.addEventListener('click', function () { note.hidden = !note.hidden; });
+
+        // 屏幕常亮（检测时不用反复点屏幕唤醒）
+        var wakeLock = null;
+        if ('wakeLock' in navigator) {
+          btnWake.hidden = false;
+          btnWake.addEventListener('click', function () {
+            if (wakeLock) {
+              wakeLock.release();
+              wakeLock = null;
+              btnWake.classList.remove('on');
+            } else {
+              navigator.wakeLock.request('screen').then(function (lock) {
+                wakeLock = lock;
+                btnWake.classList.add('on');
+                lock.addEventListener('release', function () {
+                  wakeLock = null;
+                  btnWake.classList.remove('on');
+                });
+              }).catch(function () { /* 不支持或被拒绝时静默 */ });
+            }
+          });
+          document.addEventListener('visibilitychange', function () {
+            // 页面切回来时不自动重拿，避免违背用户手动关闭
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>
